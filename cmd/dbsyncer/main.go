@@ -57,83 +57,59 @@ func dbSyncer(uri, source, dest string) error {
 	}
 
 	sourceDB := client.Database(source)
-	return withTransaction(ctx, sourceDB, func(sessionctx mongo.SessionContext) error {
-		collectionNames, err := sourceDB.ListCollectionNames(ctx, bson.D{})
-		if err != nil {
-			return err
-		}
+	collectionNames, err := sourceDB.ListCollectionNames(ctx, bson.D{})
+	if err != nil {
+		return err
+	}
 
-		worker := func(ctx context.Context, name string, errChan chan<- error, wg *sync.WaitGroup) {
-			defer wg.Done()
+	worker := func(ctx context.Context, name string, errChan chan<- error, wg *sync.WaitGroup) {
+		defer wg.Done()
 
-			collection := sourceDB.Collection(name)
-			_, err := collection.Aggregate(ctx, mongo.Pipeline{
-				{{
-					Key: "$out",
-					Value: bson.D{
-						{
-							Key:   "db",
-							Value: dest,
-						},
-						{
-							Key:   "coll",
-							Value: name,
-						},
+		collection := sourceDB.Collection(name)
+		_, err := collection.Aggregate(ctx, mongo.Pipeline{
+			{{
+				Key: "$out",
+				Value: bson.D{
+					{
+						Key:   "db",
+						Value: dest,
 					},
-				}},
-			})
+					{
+						Key:   "coll",
+						Value: name,
+					},
+				},
+			}},
+		})
 
-			if err != nil {
-				errChan <- err
-				return
-			}
+		if err != nil {
+			errChan <- err
+			return
 		}
-
-		var wg sync.WaitGroup
-		errChan := make(chan error, 1)
-		ctx, cancel := context.WithCancel(sessionctx)
-		defer cancel()
-
-		for _, name := range collectionNames {
-			wg.Add(1)
-			go worker(ctx, name, errChan, &wg)
-		}
-
-		done := make(chan struct{})
-		go func() {
-			wg.Wait()
-			close(done)
-		}()
-
-		select {
-		case err := <-errChan:
-			cancel()
-			return err
-		case <-done:
-			return nil
-		}
-	})
-}
-
-func withTransaction(ctx context.Context, db *mongo.Database, fn func(sessionctx mongo.SessionContext) error) error {
-	session, err := db.Client().StartSession()
-	if err != nil {
-		return err
-	}
-	defer session.EndSession(ctx)
-
-	if err := session.StartTransaction(); err != nil {
-		return err
 	}
 
-	sessionctx := mongo.NewSessionContext(ctx, session)
-	err = fn(sessionctx)
-	if err != nil {
-		if errRollback := session.AbortTransaction(sessionctx); errRollback != nil {
-			return errRollback
-		}
-		return err
+	var wg sync.WaitGroup
+	errChan := make(chan error, 1)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	for _, name := range collectionNames {
+		fmt.Printf("Syncing collection: %s\n", name)
+		wg.Add(1)
+		go worker(ctx, name, errChan, &wg)
 	}
 
-	return session.CommitTransaction(sessionctx)
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case err := <-errChan:
+		cancel()
+		return err
+	case <-done:
+		return nil
+	}
 }
