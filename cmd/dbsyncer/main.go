@@ -58,7 +58,7 @@ func dbSyncer(uri, source, dest string) error {
 
 	sourceDB := client.Database(source)
 	return withTransaction(ctx, sourceDB, func(sessionctx mongo.SessionContext) error {
-		collectionNames, err := sourceDB.ListCollectionNames(sessionctx, bson.D{})
+		collectionNames, err := sourceDB.ListCollectionNames(ctx, bson.D{})
 		if err != nil {
 			return err
 		}
