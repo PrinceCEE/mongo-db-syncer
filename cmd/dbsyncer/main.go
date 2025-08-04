@@ -58,7 +58,7 @@ func dbSyncer(uri, source, dest string) error {
 
 	sourceDB := client.Database(source)
 	return withTransaction(ctx, sourceDB, func(sessionctx mongo.SessionContext) error {
-		collectionNames, err := sourceDB.ListCollectionNames(ctx, bson.D{})
+		collectionNames, err := sourceDB.ListCollectionNames(sessionctx, bson.D{})
 		if err != nil {
 			return err
 		}
@@ -91,7 +91,7 @@ func dbSyncer(uri, source, dest string) error {
 
 		var wg sync.WaitGroup
 		errChan := make(chan error, 1)
-		ctx, cancel := context.WithCancel(ctx)
+		ctx, cancel := context.WithCancel(sessionctx)
 		defer cancel()
 
 		for _, name := range collectionNames {
